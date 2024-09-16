@@ -32,4 +32,5 @@ type ApiKey uint16
 
 const (
 	ApiVersions ApiKey = 18
+	Fetch       ApiKey = 1
 )

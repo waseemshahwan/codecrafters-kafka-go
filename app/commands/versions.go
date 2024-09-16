@@ -9,5 +9,8 @@ func GetApiKeys() ApiKeys {
 		globals.ApiVersions: {
 			4: ApiVersionsV4,
 		},
+		globals.Fetch: {
+			16: FetchV16,
+		},
 	}
 }

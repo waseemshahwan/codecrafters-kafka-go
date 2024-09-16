@@ -26,7 +26,8 @@ func ApiVersionsV4(request *globals.Request) *globals.Response {
 			throttle_time_size+
 			tagged_fields_size,
 	)
-	response_payload[0] = 2
+
+	response_payload[0] = 1 + uint8(len(api_keys))
 
 	index := 0
 	for api_key, versions_map := range api_keys {
