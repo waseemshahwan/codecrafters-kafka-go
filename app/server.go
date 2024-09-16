@@ -38,18 +38,48 @@ func ReadRequestLength(conn net.Conn) (*int, error) {
 	return &length, nil
 }
 
-func ReadRequest(conn net.Conn, request_length int) ([]byte, error) {
-	buf := make([]byte, request_length)
+func ReadExactBytes(conn net.Conn, length int) ([]byte, error) {
+	buf := make([]byte, length)
 	n, err := conn.Read(buf)
 	if err != nil {
 		return nil, err
 	}
 
-	if n != request_length {
-		return nil, fmt.Errorf("expected %d bytes, got %d", request_length, n)
+	if n != length {
+		return nil, fmt.Errorf("expected %d bytes, got %d", length, n)
 	}
 
 	return buf, nil
+}
+
+type Request struct {
+	ApiKey        []byte
+	ApiVersion    []byte
+	CorrelationId []byte
+	Body          []byte
+}
+
+func ReadRequest(conn net.Conn, request_length int) (*Request, error) {
+	buf, err := ReadExactBytes(conn, request_length)
+	if err != nil {
+		return nil, err
+	}
+
+	LogBytesInHex("Received raw request:", buf)
+
+	request_api_key := buf[:2]
+	request_api_version := buf[2:4]
+	correlation_id := buf[4:12]
+	body := buf[12:]
+
+	request := &Request{
+		ApiKey:        request_api_key,
+		ApiVersion:    request_api_version,
+		CorrelationId: correlation_id,
+		Body:          body,
+	}
+
+	return request, nil
 }
 
 func HandleConn(conn net.Conn) {
@@ -68,18 +98,14 @@ func HandleConn(conn net.Conn) {
 			return
 		}
 
-		LogBytesInHex("Received request:", request)
-
 		// sample response hardcoded
 		response_length := make([]byte, 4)
 		binary.BigEndian.PutUint32(response_length, uint32(4))
 		LogBytesInHex("Sending response length:", response_length)
 		conn.Write(response_length)
 
-		response := make([]byte, 4)
-		binary.BigEndian.PutUint32(response, uint32(7))
-		LogBytesInHex("Sending response:", response)
-		conn.Write(response)
+		LogBytesInHex("Sending response:", request.CorrelationId)
+		conn.Write(request.CorrelationId)
 	}
 }
 
