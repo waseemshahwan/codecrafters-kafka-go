@@ -1,39 +1,33 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"net"
 	"os"
 )
 
-func LogBytesInHex(message string, data []byte) {
-	fmt.Print(message + " [")
+func LogBytesInHex(data []byte) {
 	for i, b := range data {
-		fmt.Printf("%x", b)
-		if i < len(data)-1 {
-			fmt.Print(" ")
+		hex := "0" + fmt.Sprintf("%x", b)
+		hex = hex[len(hex)-2:]
+
+		fmt.Printf("%s ", hex)
+		if i%8 == 7 && len(data)%8 != 0 {
+			fmt.Println()
 		}
 	}
-	fmt.Println("]")
+	fmt.Println()
 }
 
 func ReadRequestLength(conn net.Conn) (*int, error) {
-	buf := make([]byte, 4)
-	n, err := conn.Read(buf)
+	buf, err := ReadExactBytes(conn, 4)
 	if err != nil {
 		return nil, err
 	}
 
-	data := buf[:n]
-	LogBytesInHex("Received bytes:", data)
-	if n != 4 {
-		return nil, fmt.Errorf("expected 4 bytes, got %d", n)
-	}
-
-	length := int(binary.BigEndian.Uint32(data))
-
-	fmt.Println("Received length: ", length)
+	length := int(binary.BigEndian.Uint32(buf))
 
 	return &length, nil
 }
@@ -45,11 +39,21 @@ func ReadExactBytes(conn net.Conn, length int) ([]byte, error) {
 		return nil, err
 	}
 
+	fmt.Println("Read ", n, " bytes")
+	LogBytesInHex(buf)
+
 	if n != length {
 		return nil, fmt.Errorf("expected %d bytes, got %d", length, n)
 	}
 
 	return buf, nil
+}
+
+func SendBytes(conn net.Conn, bytes []byte) {
+	fmt.Println("Send ", len(bytes), " bytes")
+	LogBytesInHex(bytes)
+
+	conn.Write(bytes)
 }
 
 type Request struct {
@@ -59,24 +63,47 @@ type Request struct {
 	Body          []byte
 }
 
+func ParseApiVersion(request Request) bool {
+	VALID_API_VERSIONS := [][]byte{
+		{0, 0, 0, 0},
+		{0, 0, 0, 1},
+		{0, 0, 0, 2},
+		{0, 0, 0, 3},
+		{0, 0, 0, 4},
+	}
+
+	for _, version := range VALID_API_VERSIONS {
+		if bytes.Equal(request.ApiVersion, version) {
+			return true
+		}
+	}
+
+	return false
+}
+
 func ReadRequest(conn net.Conn, request_length int) (*Request, error) {
 	buf, err := ReadExactBytes(conn, request_length)
 	if err != nil {
 		return nil, err
 	}
 
-	LogBytesInHex("Received raw request:", buf)
-
 	request_api_key := buf[:2]
 	request_api_version := buf[2:4]
-	correlation_id := buf[4:12]
-	body := buf[12:]
+	correlation_id := buf[4:8]
+	body := buf[8:]
 
 	request := &Request{
 		ApiKey:        request_api_key,
 		ApiVersion:    request_api_version,
 		CorrelationId: correlation_id,
 		Body:          body,
+	}
+
+	if !ParseApiVersion(*request) {
+		SendBytes(conn, []byte{0, 0, 0, 8})
+		SendBytes(conn, request.CorrelationId)
+		SendBytes(conn, []byte{0, 35})
+		return nil, fmt.Errorf("invalid api version")
 	}
 
 	return request, nil
@@ -98,14 +125,14 @@ func HandleConn(conn net.Conn) {
 			return
 		}
 
-		// sample response hardcoded
-		response_length := make([]byte, 4)
-		binary.BigEndian.PutUint32(response_length, uint32(4))
-		LogBytesInHex("Sending response length:", response_length)
-		conn.Write(response_length)
+		// Response length of 4 bytes, for now it is ignored
+		SendBytes(conn, []byte{0, 0, 0, 4})
 
-		LogBytesInHex("Sending response:", request.CorrelationId)
-		conn.Write(request.CorrelationId)
+		// Send correlation id back to client
+		SendBytes(conn, request.CorrelationId)
+
+		// Send an INVALID_VERSION error back to client
+		SendBytes(conn, []byte{35})
 	}
 }
 
